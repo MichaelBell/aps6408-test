@@ -5,6 +5,7 @@
 #include "hardware/sync.h"
 #include "hardware/clocks.h"
 #include "pico/stdlib.h"
+#include <cstdio>
 
 #ifndef NO_QSTR
 #include "aps6408.pio.h"
@@ -23,30 +24,32 @@ namespace {
         pio_sm_config c = aps6408_read_program_get_default_config(offset);
         sm_config_set_in_pins(&c, d0);
         sm_config_set_in_shift(&c, true, true, 32);
+        sm_config_set_out_pins(&c, d0, 8);
 
         pio_sm_init(pio, sm, offset, &c);
         pio_sm_set_enabled(pio, sm, true);
     }
     void aps6408_command_program_init(PIO pio, uint sm, uint offset, uint sck, uint d0) {
-        pio_gpio_init(pio, sck);
-        pio_gpio_init(pio, sck + 1);
-        for (uint i = 0; i < 8; ++i)
-            pio_gpio_init(pio, d0 + i);
-        pio_sm_set_consecutive_pindirs(pio, sm, sck, 2, true);
-        pio_sm_set_consecutive_pindirs(pio, sm, d0, 8, false);
-
         pio_sm_config c = aps6408_command_program_get_default_config(offset);
         sm_config_set_in_pins(&c, d0);
         sm_config_set_in_shift(&c, true, true, 32);
         sm_config_set_out_pins(&c, d0, 8);
         sm_config_set_out_shift(&c, true, true, 32);
-        sm_config_set_set_pins(&c, d0, 8);
         sm_config_set_sideset_pins(&c, sck);
+
+        pio_gpio_init(pio, sck);
+        pio_gpio_init(pio, sck + 1);
+
+        for (uint i = 0; i < 8; ++i)
+            pio_gpio_init(pio, d0 + i);
+
+        pio_sm_set_consecutive_pindirs(pio, sm, sck, 2, true);
+        pio_sm_set_consecutive_pindirs(pio, sm, d0, 8, false);
 
         pio_sm_init(pio, sm, offset, &c);
 
         pio_sm_put(pio, sm, 0xff);
-        pio_sm_exec_wait_blocking(pio, sm, pio_encode_out(pio_isr, 32));
+        pio_sm_exec_wait_blocking(pio, sm, pio_encode_out(pio_isr, 32) | pio_encode_sideset(2, 2));
 
         pio_sm_set_enabled(pio, sm, true);
     }
@@ -61,8 +64,11 @@ namespace pimoroni {
         // Initialize data pins
         for (int i = 0; i < 8; ++i) {
             gpio_init(pin_d0 + i);
-            gpio_disable_pulls(pin_d0 + i);
+            gpio_set_pulls(pin_d0 + i, false, true);
         }
+
+        gpio_init(pin_sck + 1);
+        gpio_pull_up(pin_sck + 1);
 
         // Initialize dqs
         gpio_init(pin_dqs);
@@ -77,8 +83,8 @@ namespace pimoroni {
         gpio_put(pin_rst, 1);
         sleep_us(10);
 
-        pio_read_sm = pio_claim_unused_sm(pio, true);
         pio_command_sm = pio_claim_unused_sm(pio, true);
+        pio_read_sm = pio_claim_unused_sm(pio, true);
 
         pio_command_offset = pio_add_program(pio, &aps6408_command_program);
         pio_read_offset = pio_add_program(pio, &aps6408_read_program);
@@ -92,17 +98,19 @@ namespace pimoroni {
     void APS6408::init() {
         aps6408_command_program_init(pio, pio_command_sm, pio_command_offset, pin_sck, pin_d0);
         aps6408_read_program_init(pio, pio_read_sm, pio_read_offset, pin_d0);
+    }
 
+    void APS6408::init2() {
         sleep_us(200);
         // Set read latency to fixed and default 10 cycles (max 133MHz)
         pio_sm_put_blocking(pio, pio_command_sm, 0xc0000000u);
         pio_sm_put_blocking(pio, pio_command_sm, 0x00000000u);
         pio_sm_put_blocking(pio, pio_command_sm, pio_command_offset + aps6408_command_offset_do_reg_write);
-        pio_sm_put_blocking(pio, pio_command_sm, 0x29u | (pio_command_offset << 16));
+        pio_sm_put_blocking(pio, pio_command_sm, 0x28u | (pio_command_offset << 16));
 
         // Set write latency to 3 cycles (max 66MHz)
         pio_sm_put_blocking(pio, pio_command_sm, 0xc0000000u);
-        pio_sm_put_blocking(pio, pio_command_sm, 0x00000004u);
+        pio_sm_put_blocking(pio, pio_command_sm, 0x04000000u);
         pio_sm_put_blocking(pio, pio_command_sm, pio_command_offset + aps6408_command_offset_do_reg_write);
         pio_sm_put_blocking(pio, pio_command_sm, 0x00u | (pio_command_offset << 16));
     }
@@ -137,24 +145,24 @@ namespace pimoroni {
         );
     }
 
-    void APS6408::write(uint32_t addr, uint32_t* data, uint32_t len_in_words) {
+    void __no_inline_not_in_flash_func(APS6408::write)(uint32_t addr, const uint32_t* data, uint32_t len_in_words) {
         pio_sm_put_blocking(pio, pio_command_sm, ((len_in_words << 1) - 1) | 0xa0000000);
-        pio_sm_put_blocking(pio, pio_command_sm, addr);
+        pio_sm_put_blocking(pio, pio_command_sm, __bswap32(addr));
         pio_sm_put_blocking(pio, pio_command_sm, pio_command_offset + aps6408_command_offset_do_write);
 
-        dma_channel_transfer_from_buffer_now(write_dma_channel, data, (len_in_words >> 2));
+        dma_channel_transfer_from_buffer_now(write_dma_channel, data, len_in_words);
 
         // This should be done by chaining
         dma_channel_wait_for_finish_blocking(write_dma_channel);
         pio_sm_put_blocking(pio, pio_command_sm, pio_command_offset);
     }
 
-    void APS6408::read(uint32_t addr, uint32_t* read_buf, uint32_t len_in_words) {
+    void __no_inline_not_in_flash_func(APS6408::read)(uint32_t addr, uint32_t* read_buf, uint32_t len_in_words) {
         pio_sm_put_blocking(pio, pio_command_sm, ((len_in_words << 1) + 8) | 0x20000000);
-        pio_sm_put_blocking(pio, pio_command_sm, addr);
+        pio_sm_put_blocking(pio, pio_command_sm, __bswap32(addr));
         pio_sm_put_blocking(pio, pio_command_sm, pio_command_offset + aps6408_command_offset_do_read);
 
-        dma_channel_transfer_to_buffer_now(read_dma_channel, read_buf, (len_in_words >> 2));
+        dma_channel_transfer_to_buffer_now(read_dma_channel, read_buf, len_in_words);
         dma_channel_wait_for_finish_blocking(read_dma_channel);
 
         // This could be done by an interrupt on read complete, or maybe by chaining?

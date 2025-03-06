@@ -13,14 +13,15 @@ namespace pimoroni {
             APS6408(uint pin_sck = 12, uint pin_d0 = 4, uint pin_dqs = 14, uint pin_rst = 15, PIO pio = pio0);
 
             void init();
+            void init2();
 
             // Start a write, this completes asynchronously, this function blocks if another 
             // transfer is already in progress
             // Writes should always be <= 1KB and must not cross 1kB boundaries
-            void write(uint32_t addr, uint32_t* data, uint32_t len_in_words);
+            void write(uint32_t addr, const uint32_t* data, uint32_t len_in_words);
 
             // Write and block until completion
-            void write_blocking(uint32_t addr, uint32_t* data, uint32_t len_in_words) {
+            void write_blocking(uint32_t addr, const uint32_t* data, uint32_t len_in_words) {
                 write(addr, data, len_in_words);
                 dma_channel_wait_for_finish_blocking(write_dma_channel);
             }

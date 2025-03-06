@@ -20,6 +20,7 @@ pico_sdk_init()
 add_executable(${NAME}
     main.cpp # <-- Add source files here!
     aps6408.cpp
+    logic_analyser.c
 )
 
 pico_generate_pio_header(${NAME} ${CMAKE_CURRENT_LIST_DIR}/aps6408.pio)
