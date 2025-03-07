@@ -48,8 +48,11 @@ namespace pimoroni {
             uint16_t pio_command_sm;
             uint16_t pio_read_offset;
             uint32_t pio_command_offset;
+            uint32_t pio_command_write;
+            uint32_t pio_command_read;
 
             uint write_dma_channel;
+            uint write_complete_dma_channel;
             uint read_dma_channel;
     };
 }

@@ -4,9 +4,10 @@
 ; - D0 is IN/OUT/SET pin 0
 ;
 ; DMA is 32 bit.  Stream takes form:
-; 24 bits For read: length of read in bytes/2, plus 8
+; 16 bits For read: length of read in bytes/2, plus 8
 ;         For write: length of write in bytes/2, minus 1
 ;         Original data length in bits must be a multiple of 32
+; 8 bits 0xff
 ; 8 bits AP6408 cmd (read: 0x20, write: 0xa0, write reg: 0xc0)
 ; 32 bits address
 ; 32 bits jmp label for do_read/do_write
@@ -15,13 +16,12 @@
 
 ; Write/command SM
 ; ISR must be preloaded with 0xFF
-.pio_version 1
 .program aps6408_command
 .side_set 2
 top:
   set x, 1          side 0b10
-  out y, 24         side 0b10
-  mov pindirs, isr  side 0b10
+  out y, 16         side 0b10
+  out pindirs, 8    side 0b10
 
 ; Write command, followed by address
   out pins, 8       side 0b00
@@ -52,9 +52,10 @@ read_lp:
 ; Read SM
 .program aps6408_read
 top:
-  set x, 20
+  set x, 19
   irq wait 4
-  mov pindirs, null
+  mov osr, null
+  out pindirs, 8
 wait_lp:
   jmp x--, wait_lp  
 .wrap_target
