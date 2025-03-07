@@ -51,12 +51,47 @@ namespace {
         pio_sm_init(pio, sm, offset, &c);
         pio_sm_set_enabled(pio, sm, true);
     }
+
+    PIO aps6408_pio;
+    uint aps6408_read_sm_0;
+    uint aps6408_read_sm_1;
+    uint pio_read_offset = -1;
+    uint pio_command_offset = -1;
+    uint pio_command_write;
+    uint pio_command_read;
+
+    void __no_inline_not_in_flash_func(reset_read_sm_0)()
+    {
+        pio_sm_set_enabled(aps6408_pio, aps6408_read_sm_0, false);
+        pio_sm_clear_fifos(aps6408_pio, aps6408_read_sm_0);
+        pio_sm_restart(aps6408_pio, aps6408_read_sm_0);
+        pio_sm_exec(aps6408_pio, aps6408_read_sm_0, pio_encode_jmp(pio_read_offset));
+        pio_sm_set_enabled(aps6408_pio, aps6408_read_sm_0, true);
+
+        // Acknowledge channel - assume this is an exclusive handler 
+        // so just acknowledge whatever is active
+        dma_hw->ints0 = dma_hw->ints0;
+    }
+
+    void __no_inline_not_in_flash_func(reset_read_sm_1)()
+    {
+        pio_sm_set_enabled(aps6408_pio, aps6408_read_sm_1, false);
+        pio_sm_clear_fifos(aps6408_pio, aps6408_read_sm_1);
+        pio_sm_restart(aps6408_pio, aps6408_read_sm_1);
+        pio_sm_exec(aps6408_pio, aps6408_read_sm_1, pio_encode_jmp(pio_read_offset));
+        pio_sm_set_enabled(aps6408_pio, aps6408_read_sm_1, true);
+
+        // Acknowledge channel - assume this is an exclusive handler 
+        // so just acknowledge whatever is active
+        dma_hw->ints1 = dma_hw->ints1;
+    }
 }
 
 namespace pimoroni {
-    APS6408::APS6408(uint pin_sck, uint pin_d0, uint pin_dqs, uint pin_rst, PIO pio)
+    APS6408::APS6408(uint pin_sck, uint pin_d0, uint pin_dqs, uint pin_rst, uint dma_irq, PIO pio)
                 : pin_sck(pin_sck)
                 , pin_d0(pin_d0)
+                , dma_irq(dma_irq)
                 , pio(pio)
     {
         // Initialize data pins
@@ -85,12 +120,16 @@ namespace pimoroni {
 
         pio_command_sm = pio_claim_unused_sm(pio, true);
         pio_read_sm = pio_claim_unused_sm(pio, true);
+        aps6408_read_sm_0 = pio_read_sm;
 
-        pio_command_offset = pio_add_program(pio, &aps6408_command_program);
-        pio_read_offset = pio_add_program(pio, &aps6408_read_program);
+        if (pio_command_offset == -1) {
+            aps6408_pio = pio;
+            pio_command_offset = pio_add_program(pio, &aps6408_command_program);
+            pio_read_offset = pio_add_program(pio, &aps6408_read_program);
 
-        pio_command_write = pio_command_offset + aps6408_command_offset_do_write;
-        pio_command_read = pio_command_offset + aps6408_command_offset_do_read;
+            pio_command_write = pio_command_offset + aps6408_command_offset_do_write;
+            pio_command_read = pio_command_offset + aps6408_command_offset_do_read;
+        }
 
         // Claim DMA channels
         write_dma_channel = dma_claim_unused_channel(true);
@@ -102,9 +141,7 @@ namespace pimoroni {
     void APS6408::init() {
         aps6408_command_program_init(pio, pio_command_sm, pio_command_offset, pin_sck, pin_d0);
         aps6408_read_program_init(pio, pio_read_sm, pio_read_offset, pin_d0);
-    }
 
-    void APS6408::init2() {
         sleep_us(200);
         // Set read latency to fixed and default 10 cycles (max 133MHz)
         pio_sm_put_blocking(pio, pio_command_sm, 0xc0ff0000u);
@@ -120,6 +157,21 @@ namespace pimoroni {
     }
 
     void APS6408::setup_dma_config() {
+        irq_set_exclusive_handler(DMA_IRQ_0 + dma_irq, (dma_irq & 1) ? reset_read_sm_1 : reset_read_sm_0);
+        switch (dma_irq) {
+            case 0:
+                dma_hw->ints0 = dma_hw->ints0;
+                dma_hw->inte0 = 1u << read_dma_channel;
+                break;
+            case 1:
+                dma_hw->ints1 = dma_hw->ints0;
+                dma_hw->inte1 = 1u << read_dma_channel;
+                break;
+            default:
+                panic("Invalid DMA irq %d", dma_irq);
+        }
+        irq_set_enabled(DMA_IRQ_0 + dma_irq, true);
+
         dma_channel_config c = dma_channel_get_default_config(read_dma_channel);
         channel_config_set_read_increment(&c, false);
         channel_config_set_write_increment(&c, true);
@@ -184,13 +236,5 @@ namespace pimoroni {
         pio_sm_put_blocking(pio, pio_command_sm, pio_command_read);
 
         dma_channel_transfer_to_buffer_now(read_dma_channel, read_buf, len_in_words);
-        dma_channel_wait_for_finish_blocking(read_dma_channel);
-
-        // This could be done by an interrupt on read complete, or maybe by chaining?
-        pio_sm_set_enabled(pio, pio_read_sm, false);
-        pio_sm_clear_fifos(pio, pio_read_sm);
-        pio_sm_restart(pio, pio_read_sm);
-        pio_sm_exec(pio, pio_read_sm, pio_encode_jmp(pio_read_offset));
-        pio_sm_set_enabled(pio, pio_read_sm, true);
     }
 }

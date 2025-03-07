@@ -40,12 +40,11 @@ int main() {
     logic_analyser_init(pio1, 4, 12, 1000, 1.f);
     sram.init();
 
-    sram.init2();
-
     uint32_t data = 0x92345678;
     sram.write(0, &data, 1);
 
     uint32_t read_data = 0;
+    sram.read_blocking(0, &read_data, 1);
     logic_analyser_arm(13, false);
     sram.read_blocking(0, &read_data, 1);
     logic_analyser_print_capture_buf(0);

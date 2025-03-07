@@ -10,7 +10,9 @@ namespace pimoroni {
             static constexpr int RAM_SIZE = 8 * 1024 * 1024;
             static constexpr int PAGE_SIZE = 1024;
 
-            APS6408(uint pin_sck = 12, uint pin_d0 = 4, uint pin_dqs = 14, uint pin_rst = 15, PIO pio = pio0);
+            // If two APS6408s are instantiated, they must use the same PIO and different IRQs.
+            // DMA IRQ must be 0 or 1, an exclusive handler is installed.
+            APS6408(uint pin_sck = 12, uint pin_d0 = 4, uint pin_dqs = 14, uint pin_rst = 15, uint dma_irq = 0, PIO pio = pio0);
 
             void init();
             void init2();
@@ -42,14 +44,11 @@ namespace pimoroni {
 
             uint pin_sck;  // SCK, CSn must be next pin after SCK
             uint pin_d0;   // D0-D7 must be consecutive
+            uint dma_irq;
 
             PIO pio;
             uint16_t pio_read_sm;
             uint16_t pio_command_sm;
-            uint16_t pio_read_offset;
-            uint32_t pio_command_offset;
-            uint32_t pio_command_write;
-            uint32_t pio_command_read;
 
             uint write_dma_channel;
             uint write_complete_dma_channel;
