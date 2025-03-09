@@ -133,7 +133,6 @@ namespace pimoroni {
 
         // Claim DMA channels
         write_dma_channel = dma_claim_unused_channel(true);
-        write_complete_dma_channel = dma_claim_unused_channel(true);
         read_dma_channel = dma_claim_unused_channel(true);
         setup_dma_config();
     }
@@ -186,26 +185,11 @@ namespace pimoroni {
             false
         );
 
-        c = dma_channel_get_default_config(write_complete_dma_channel);
-        channel_config_set_read_increment(&c, false);
-        channel_config_set_write_increment(&c, false);
-        channel_config_set_dreq(&c, pio_get_dreq(pio, pio_command_sm, true));
-        channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
-
-        dma_channel_configure(
-            write_complete_dma_channel, &c,
-            &pio->txf[pio_command_sm],
-            &pio_command_offset,
-            1,
-            false
-        );
-
         c = dma_channel_get_default_config(write_dma_channel);
         channel_config_set_read_increment(&c, true);
         channel_config_set_write_increment(&c, false);
         channel_config_set_dreq(&c, pio_get_dreq(pio, pio_command_sm, true));
         channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
-        channel_config_set_chain_to(&c, write_complete_dma_channel);
 
         dma_channel_configure(
             write_dma_channel, &c,
@@ -218,7 +202,6 @@ namespace pimoroni {
 
     void __no_inline_not_in_flash_func(APS6408::write)(uint32_t addr, const uint32_t* data, uint32_t len_in_words) {
         dma_channel_wait_for_finish_blocking(write_dma_channel);
-        dma_channel_wait_for_finish_blocking(write_complete_dma_channel);
 
         pio_sm_put_blocking(pio, pio_command_sm, ((len_in_words << 1) - 1) | 0xa0ff0000);
         pio_sm_put_blocking(pio, pio_command_sm, __bswap32(addr));
@@ -229,7 +212,6 @@ namespace pimoroni {
 
     void __no_inline_not_in_flash_func(APS6408::read)(uint32_t addr, uint32_t* read_buf, uint32_t len_in_words) {
         dma_channel_wait_for_finish_blocking(write_dma_channel);
-        dma_channel_wait_for_finish_blocking(write_complete_dma_channel);
         
         pio_sm_put_blocking(pio, pio_command_sm, ((len_in_words << 1) + 8) | 0x20ff0000);
         pio_sm_put_blocking(pio, pio_command_sm, __bswap32(addr));

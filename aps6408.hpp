@@ -51,7 +51,6 @@ namespace pimoroni {
             uint16_t pio_command_sm;
 
             uint write_dma_channel;
-            uint write_complete_dma_channel;
             uint read_dma_channel;
     };
 }
